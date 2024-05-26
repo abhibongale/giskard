@@ -9,7 +9,7 @@ from . import LLMClient
 from .base import ChatMessage
 
 try:
-    import google.generativeai as genai
+    import google.generativeai as genai  # type: ignore
 except ImportError as err:
     raise LLMImportError(flavor="llm") from err
 
@@ -20,12 +20,23 @@ AUTH_ERROR_MESSAGE = (
 
 
 def _supports_json_format(model: str) -> bool:
+    if "gemini-1.5-flash-latest" in model:
+        return True
+    if model == "gemini-1.5-pro-latest" or model == "gemini-1.0-pro-latest":
+        return True
+
     return False
 
+
 class GeminiClient(LLMClient):
-    def __init__(self, model: str = "", client: gemini.Client = None, json_mode: Optional[bool] = None):
+    def __init__(
+        self,
+        model: str = "gemini-1.5-flash-latest",
+        client: genai.GenerativeModel = None,
+        json_mode: Optional[bool] = None,
+    ):
         self.model = model
-        self._client = client or openai.OpenAI()
+        self._client = client or genai.GenerativeModel(self.model)
         self.json_mode = json_mode if json_mode is not None else _supports_json_format(model)
 
     def complete(
@@ -36,10 +47,11 @@ class GeminiClient(LLMClient):
         caller_id: Optional[str] = None,
         seed: Optional[int] = None,
         format: str = None,
-    ) -> ChatMessage: 
+    ) -> ChatMessage:
         extra_params = dict()
+
         if seed is not None:
-            extra_params["random_seed"] = seed
+            extra_params["seed"] = seed
 
         if self.json_mode:
             if format not in (None, "json", "json_object"):
@@ -48,18 +60,17 @@ class GeminiClient(LLMClient):
 
             if format == "json" or format == "json_object":
                 extra_params["response_format"] = {"type": "json_object"}
-        
+
         try:
-            completion = self._client.chat_completions.create(
-                model=self.model,
+            completion = self._client.generate_content(
                 messages=[asdict(m) for m in messages],
                 temperature=temperature,
                 max_tokens=max_tokens,
                 **extra_params,
             )
-        except gemini.AuthenticationError as err:
+        except genai.AuthenticationError as err:
             raise LLMConfigurationError(AUTH_ERROR_MESSAGE) from err
-        
+
         self.logger.log_call(
             prompt_tokens=completion.usage.prompt_tokens,
             sampled_tokens=completion.usage.completion_tokens,
